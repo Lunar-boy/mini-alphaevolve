@@ -14,6 +14,10 @@ class CandidateValidationError(MinimalAlphaEvolveError):
     """Raised when a candidate violates its representation contract."""
 
 
+class CandidateEvaluationError(MinimalAlphaEvolveError):
+    """Raised when a valid candidate cannot produce a finite scalar result."""
+
+
 class ArchiveError(MinimalAlphaEvolveError):
     """Raised when an archive cannot be read or updated safely."""
 

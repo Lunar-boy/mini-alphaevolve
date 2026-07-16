@@ -3,11 +3,118 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal, TypeAlias
+
+UnaryOperator: TypeAlias = Literal["abs", "tanh"]
+BinaryOperator: TypeAlias = Literal["add", "sub", "mul", "div", "min", "max"]
+ComparisonOperator: TypeAlias = Literal["lt", "le", "gt", "ge", "eq", "ne"]
+
+
+@dataclass(frozen=True, slots=True)
+class ConstantExpression:
+    """A numeric literal in the restricted expression language."""
+
+    value: int | float
+
+
+@dataclass(frozen=True, slots=True)
+class InputExpression:
+    """A reference to one named scalar input."""
+
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class UnaryExpression:
+    """A whitelisted unary operation."""
+
+    op: UnaryOperator
+    argument: Expression
+
+
+@dataclass(frozen=True, slots=True)
+class BinaryExpression:
+    """A whitelisted arithmetic operation."""
+
+    op: BinaryOperator
+    left: Expression
+    right: Expression
+
+
+@dataclass(frozen=True, slots=True)
+class ComparisonExpression:
+    """A comparison whose scalar result is either zero or one."""
+
+    op: ComparisonOperator
+    left: Expression
+    right: Expression
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionalExpression:
+    """A lazy scalar if-then-else expression."""
+
+    condition: Expression
+    then_expression: Expression
+    else_expression: Expression
+
+
+Expression: TypeAlias = (
+    ConstantExpression
+    | InputExpression
+    | UnaryExpression
+    | BinaryExpression
+    | ComparisonExpression
+    | ConditionalExpression
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ExpressionLimits:
+    """Immutable structural and numeric limits for candidate expressions."""
+
+    max_depth: int = 16
+    max_nodes: int = 128
+    max_constant_magnitude: float = 1_000_000.0
+    allowed_input_names: frozenset[str] = field(
+        default_factory=lambda: frozenset({"x0"})
+    )
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.max_depth, int)
+            or isinstance(self.max_depth, bool)
+            or self.max_depth < 1
+        ):
+            raise ValueError("max_depth must be a positive integer")
+        if (
+            not isinstance(self.max_nodes, int)
+            or isinstance(self.max_nodes, bool)
+            or self.max_nodes < 1
+        ):
+            raise ValueError("max_nodes must be a positive integer")
+        magnitude_is_finite = False
+        if isinstance(self.max_constant_magnitude, (int, float)) and not isinstance(
+            self.max_constant_magnitude, bool
+        ):
+            try:
+                magnitude_is_finite = math.isfinite(self.max_constant_magnitude)
+            except OverflowError:
+                magnitude_is_finite = False
+        if not magnitude_is_finite or self.max_constant_magnitude < 0:
+            raise ValueError("max_constant_magnitude must be finite and non-negative")
+
+        names = frozenset(self.allowed_input_names)
+        if not names:
+            raise ValueError("allowed_input_names must not be empty")
+        if any(re.fullmatch(r"x(?:0|[1-9][0-9]*)", name) is None for name in names):
+            raise ValueError("each allowed input name must have the form x0 ... xN")
+        object.__setattr__(self, "allowed_input_names", names)
 
 
 def utc_now_iso() -> str:
