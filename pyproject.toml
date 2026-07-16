@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "minimal-alphaevolve"
+name = "mini-alphaevolve"
 version = "0.1.0"
 description = "Minimal AlphaEvolve-style program evolution using GWDG SAIA"
 readme = "README.md"
@@ -26,10 +26,10 @@ dev = [
 ]
 
 [project.scripts]
-minae = "minimal_alphaevolve.cli:app"
+minae = "mini_alphaevolve.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/minimal_alphaevolve"]
+packages = ["src/mini_alphaevolve"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
@@ -45,5 +45,5 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-packages = ["minimal_alphaevolve"]
+packages = ["mini_alphaevolve"]
 mypy_path = "src"

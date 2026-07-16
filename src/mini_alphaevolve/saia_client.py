@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from minimal_alphaevolve.config import SaiaSettings
-from minimal_alphaevolve.exceptions import SaiaProtocolError
+from mini_alphaevolve.config import SaiaSettings
+from mini_alphaevolve.exceptions import SaiaProtocolError
 
 
 @dataclass(frozen=True, slots=True)

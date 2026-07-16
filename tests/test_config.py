@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from minimal_alphaevolve.config import SaiaSettings
-from minimal_alphaevolve.exceptions import ConfigurationError
+from mini_alphaevolve.config import SaiaSettings
+from mini_alphaevolve.exceptions import ConfigurationError
 
 
 def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:

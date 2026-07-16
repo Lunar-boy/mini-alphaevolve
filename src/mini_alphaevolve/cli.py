@@ -7,10 +7,10 @@ import httpx
 import typer
 from rich import print as rprint
 
-from minimal_alphaevolve import __version__
-from minimal_alphaevolve.config import SaiaSettings
-from minimal_alphaevolve.exceptions import MinimalAlphaEvolveError
-from minimal_alphaevolve.saia_client import SaiaClient
+from mini_alphaevolve import __version__
+from mini_alphaevolve.config import SaiaSettings
+from mini_alphaevolve.exceptions import MinimalAlphaEvolveError
+from mini_alphaevolve.saia_client import SaiaClient
 
 app = typer.Typer(
     no_args_is_help=True,

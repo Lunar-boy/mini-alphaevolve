@@ -32,3 +32,6 @@ slurm-*.err
 .DS_Store
 .idea/
 .vscode/
+.codex
+ROADMAP.md
+AGENTS.md

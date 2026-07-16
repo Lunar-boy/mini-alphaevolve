@@ -1,4 +1,4 @@
-# minimal-alphaevolve-saia
+# mini-alphaevolve
 
 A small, testable AlphaEvolve-style program evolution framework using the
 GWDG SAIA OpenAI-compatible API.
@@ -10,10 +10,7 @@ The project is intentionally staged:
 3. add selection, lineage, persistence, and reproducibility;
 4. add controlled Python-policy execution;
 5. extend to Gymnasium and MuJoCo programmatic policies.
-
-This repository does **not** attempt to reproduce Google DeepMind's complete
-AlphaEvolve system. It implements the minimal architecture needed to study
-LLM-guided program evolution.
+.
 
 ## Security boundary
 

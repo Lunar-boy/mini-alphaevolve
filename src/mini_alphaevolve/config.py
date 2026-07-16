@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from minimal_alphaevolve.exceptions import ConfigurationError
+from mini_alphaevolve.exceptions import ConfigurationError
 
 
 @dataclass(frozen=True, slots=True)

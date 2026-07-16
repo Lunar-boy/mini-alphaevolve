@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from minimal_alphaevolve.exceptions import SaiaProtocolError
-from minimal_alphaevolve.saia_client import SaiaClient
+from mini_alphaevolve.exceptions import SaiaProtocolError
+from mini_alphaevolve.saia_client import SaiaClient
 
 
 def test_parse_model_ids_from_openai_shape() -> None:

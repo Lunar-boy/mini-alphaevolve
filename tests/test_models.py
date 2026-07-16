@@ -1,4 +1,4 @@
-from minimal_alphaevolve.models import Candidate, EvaluationResult
+from mini_alphaevolve.models import Candidate, EvaluationResult
 
 
 def test_candidate_identifier_is_stable() -> None:
