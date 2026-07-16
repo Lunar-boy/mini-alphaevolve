@@ -1,0 +1,23 @@
+saia:
+  base_url: https://chat-ai.academiccloud.de/v1
+  model: qwen3-coder-next
+  timeout_seconds: 90
+  max_retries: 2
+
+evolution:
+  seed: 20260716
+  population_size: 10
+  generations: 20
+  top_k: 3
+  exploration_probability: 0.10
+  diversity_probability: 0.20
+
+candidate:
+  representation: restricted_expression_dsl
+  max_depth: 8
+  max_nodes: 64
+  constant_abs_max: 100.0
+
+evaluation:
+  objective: toy_regression
+  complexity_weight: 0.01
