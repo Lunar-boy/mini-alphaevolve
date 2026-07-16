@@ -36,6 +36,11 @@ The initial implementation does not execute model-generated Python. Start with
 the restricted DSL described in `ROADMAP.md`. Arbitrary `exec`, `eval`,
 subprocess, filesystem, and network access are forbidden in candidate programs.
 
+Candidate and evaluation records use versioned JSON objects. `JsonlArchive`
+stores them in one append-only JSONL file, flushes each record before returning,
+and rebuilds its indexes when reopened. It is designed for a single writer;
+malformed records are reported with their file path and line number.
+
 ## Quick start
 
 Python 3.11 or newer is recommended.
