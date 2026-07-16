@@ -69,54 +69,7 @@ performs one chat-completion request using `SAIA_MODEL`, which defaults to
 | `SAIA_TIMEOUT_SECONDS` | `90` | Request timeout |
 | `SAIA_MAX_RETRIES` | `2` | OpenAI client retries |
 
-## Repository layout
-
-```text
-.
-├── AGENTS.md
-├── ROADMAP.md
-├── configs/
-├── docs/
-├── scripts/
-├── src/minimal_alphaevolve/
-├── tests/
-└── .codex/pr-prompts/
-```
-
-## Codex workflow
-
-Work through `.codex/pr-prompts/` in numerical order. Use one branch and one
-pull request per prompt:
-
-```bash
-git switch main
-git pull --ff-only
-git switch -c agent/01-contracts-archive
-
-codex
-```
-
-Then give Codex this instruction:
-
-```text
-Read AGENTS.md and .codex/pr-prompts/01-contracts-and-jsonl-archive.md.
-Implement only that task. Run all required checks. Do not weaken tests or
-security constraints. Summarize changed files, design decisions, and commands
-run.
-```
-
-After Codex finishes:
-
-```bash
-git diff --check
-ruff check .
-ruff format --check .
-mypy src
-pytest
-git status --short
-```
-
-Review the diff manually before committing.
+---
 
 ## MVP completion criterion
 
