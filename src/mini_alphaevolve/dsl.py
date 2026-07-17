@@ -252,6 +252,28 @@ def canonical_expression_json(expression: Expression) -> str:
         ) from exc
 
 
+def expression_complexity(expression: Expression) -> int:
+    """Return expression complexity as the total number of DSL nodes."""
+    if isinstance(expression, (ConstantExpression, InputExpression)):
+        return 1
+    if isinstance(expression, UnaryExpression):
+        return 1 + expression_complexity(expression.argument)
+    if isinstance(expression, (BinaryExpression, ComparisonExpression)):
+        return (
+            1
+            + expression_complexity(expression.left)
+            + expression_complexity(expression.right)
+        )
+    if isinstance(expression, ConditionalExpression):
+        return (
+            1
+            + expression_complexity(expression.condition)
+            + expression_complexity(expression.then_expression)
+            + expression_complexity(expression.else_expression)
+        )
+    raise CandidateValidationError("unknown typed expression node")
+
+
 def evaluate_expression(
     expression: Expression, inputs: Mapping[str, int | float]
 ) -> float:

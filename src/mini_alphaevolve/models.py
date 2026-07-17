@@ -117,6 +117,106 @@ class ExpressionLimits:
         object.__setattr__(self, "allowed_input_names", names)
 
 
+@dataclass(frozen=True, slots=True)
+class ToyEvaluatorConfig:
+    """Immutable configuration for the deterministic toy regression task."""
+
+    seed: int
+    train_grid: tuple[float, ...] = (
+        -2.0,
+        -1.5,
+        -1.0,
+        -0.5,
+        0.0,
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+    )
+    test_grid: tuple[float, ...] = (
+        -1.75,
+        -1.25,
+        -0.75,
+        -0.25,
+        0.25,
+        0.75,
+        1.25,
+        1.75,
+    )
+    train_error_weight: float = 1.0
+    test_error_weight: float = 0.25
+    complexity_weight: float = 0.001
+    invalid_output_penalty: float = 1_000.0
+    random_max_depth: int = 4
+    expression_limits: ExpressionLimits = field(default_factory=ExpressionLimits)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.seed, int) or isinstance(self.seed, bool):
+            raise ValueError("seed must be an integer")
+        for name in ("train_grid", "test_grid"):
+            grid = tuple(getattr(self, name))
+            if not grid:
+                raise ValueError(f"{name} must not be empty")
+            if any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                for value in grid
+            ):
+                raise ValueError(f"{name} must contain only finite numbers")
+            object.__setattr__(self, name, tuple(float(value) for value in grid))
+        if set(self.train_grid) & set(self.test_grid):
+            raise ValueError("train_grid and test_grid must be disjoint")
+        if self.expression_limits.allowed_input_names != frozenset({"x0"}):
+            raise ValueError(
+                "toy evaluator expression limits must allow exactly the input x0"
+            )
+        for name in (
+            "train_error_weight",
+            "test_error_weight",
+            "complexity_weight",
+            "invalid_output_penalty",
+        ):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(f"{name} must be finite and non-negative")
+            object.__setattr__(self, name, float(value))
+        if (
+            not isinstance(self.random_max_depth, int)
+            or isinstance(self.random_max_depth, bool)
+            or self.random_max_depth < 1
+        ):
+            raise ValueError("random_max_depth must be a positive integer")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a complete JSON-compatible description of this configuration."""
+        return {
+            "seed": self.seed,
+            "train_grid": list(self.train_grid),
+            "test_grid": list(self.test_grid),
+            "train_error_weight": self.train_error_weight,
+            "test_error_weight": self.test_error_weight,
+            "complexity_weight": self.complexity_weight,
+            "invalid_output_penalty": self.invalid_output_penalty,
+            "random_max_depth": self.random_max_depth,
+            "expression_limits": {
+                "max_depth": self.expression_limits.max_depth,
+                "max_nodes": self.expression_limits.max_nodes,
+                "max_constant_magnitude": (
+                    self.expression_limits.max_constant_magnitude
+                ),
+                "allowed_input_names": sorted(
+                    self.expression_limits.allowed_input_names
+                ),
+            },
+        }
+
+
 def utc_now_iso() -> str:
     """Return the current time as an explicit UTC ISO-8601 timestamp."""
     return datetime.now(UTC).isoformat()
