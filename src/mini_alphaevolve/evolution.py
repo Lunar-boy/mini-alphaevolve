@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -18,6 +18,7 @@ from mini_alphaevolve.exceptions import (
 from mini_alphaevolve.models import (
     Candidate,
     EvaluationResult,
+    EvolutionCheckpoint,
     EvolutionConfig,
     EvolutionFailure,
     EvolutionResult,
@@ -55,6 +56,8 @@ class Archive(Protocol):
     def add_candidate(self, candidate: Candidate) -> bool: ...
 
     def add_evaluation(self, evaluation: EvaluationResult) -> bool: ...
+
+    def get_candidate(self, candidate_id: str) -> Candidate | None: ...
 
     def get_evaluation(self, candidate_id: str) -> EvaluationResult | None: ...
 
@@ -134,28 +137,96 @@ class EvolutionController:
         self._rng = random.Random(config.seed)
         self._restart_index = 0
 
-    def run(self, initial_candidates: Sequence[Candidate] = ()) -> EvolutionResult:
-        """Run initialization and bounded proposal generations to completion."""
-        failures: list[EvolutionFailure] = []
-        evaluations_completed = 0
+    def run(
+        self,
+        initial_candidates: Sequence[Candidate] = (),
+        *,
+        checkpoint: EvolutionCheckpoint | None = None,
+        on_checkpoint: Callable[[EvolutionCheckpoint], None] | None = None,
+    ) -> EvolutionResult:
+        """Run or resume bounded evolution, emitting safe continuation points."""
+        saved = checkpoint or EvolutionCheckpoint()
+        if saved.generations_attempted > self.config.generation_budget:
+            raise ValueError("checkpoint exceeds the configured generation budget")
+        if saved.evaluations_completed > self.config.evaluation_budget:
+            raise ValueError("checkpoint exceeds the configured evaluation budget")
+        if saved.rng_state is not None:
+            self._rng.setstate(saved.rng_state)
+        self._restart_index = saved.restart_index
 
-        seeds = tuple(initial_candidates) or self._random_roots(
-            self.config.initialization_size
+        failures = list(saved.failures)
+        initializations_attempted = saved.initializations_attempted
+        generations_attempted = saved.generations_attempted
+        evaluations_completed = saved.evaluations_completed
+        pending_candidate_id = saved.pending_candidate_id
+        supplied_seeds = tuple(initial_candidates)
+        initialization_target = (
+            len(supplied_seeds) if supplied_seeds else self.config.initialization_size
         )
-        for candidate in seeds:
-            if evaluations_completed >= self.config.evaluation_budget:
-                break
+        if initializations_attempted > initialization_target:
+            raise ValueError("checkpoint exceeds the initialization candidate count")
+
+        def emit_checkpoint() -> None:
+            if on_checkpoint is None:
+                return
+            on_checkpoint(
+                EvolutionCheckpoint(
+                    initializations_attempted=initializations_attempted,
+                    generations_attempted=generations_attempted,
+                    evaluations_completed=evaluations_completed,
+                    restart_index=self._restart_index,
+                    rng_state=self._rng.getstate(),
+                    pending_candidate_id=pending_candidate_id,
+                    failures=tuple(failures),
+                )
+            )
+
+        if pending_candidate_id is not None:
+            pending = self._archive.get_candidate(pending_candidate_id)
+            if pending is None:
+                raise RuntimeError(
+                    "checkpoint references a candidate missing from the archive"
+                )
+            already_evaluated = (
+                self._archive.get_evaluation(pending_candidate_id) is not None
+            )
+            if already_evaluated or self._evaluate(
+                pending,
+                controller_generation=max(1, generations_attempted),
+                failures=failures,
+            ):
+                evaluations_completed += 1
+            pending_candidate_id = None
+            emit_checkpoint()
+
+        while (
+            initializations_attempted < initialization_target
+            and evaluations_completed < self.config.evaluation_budget
+        ):
+            candidate = (
+                supplied_seeds[initializations_attempted]
+                if supplied_seeds
+                else self._random_roots(1)[0]
+            )
             if candidate.parent_id is not None or candidate.generation != 0:
                 raise ValueError("initial candidates must be generation-zero roots")
-            completed = self._persist_and_evaluate(
-                candidate, controller_generation=1, failures=failures
-            )
-            evaluations_completed += int(completed)
+            initializations_attempted += 1
+            added = self._archive.add_candidate(candidate)
+            if not added and self._archive.get_evaluation(candidate.candidate_id):
+                emit_checkpoint()
+                continue
+            pending_candidate_id = candidate.candidate_id
+            emit_checkpoint()
+            if self._evaluate(candidate, controller_generation=1, failures=failures):
+                evaluations_completed += 1
+            pending_candidate_id = None
+            emit_checkpoint()
 
-        generations_attempted = 0
-        for controller_generation in range(1, self.config.generation_budget + 1):
-            if evaluations_completed >= self.config.evaluation_budget:
-                break
+        while (
+            generations_attempted < self.config.generation_budget
+            and evaluations_completed < self.config.evaluation_budget
+        ):
+            controller_generation = generations_attempted + 1
             generations_attempted += 1
             selection = self._selector.select(self._archive, self._rng)
             if selection.parent is None:
@@ -188,13 +259,22 @@ class EvolutionController:
                             parent_id=parent.candidate_id,
                         )
                     )
+                    emit_checkpoint()
                     continue
-            completed = self._persist_and_evaluate(
+            added = self._archive.add_candidate(candidate)
+            if not added and self._archive.get_evaluation(candidate.candidate_id):
+                emit_checkpoint()
+                continue
+            pending_candidate_id = candidate.candidate_id
+            emit_checkpoint()
+            if self._evaluate(
                 candidate,
                 controller_generation=controller_generation,
                 failures=failures,
-            )
-            evaluations_completed += int(completed)
+            ):
+                evaluations_completed += 1
+            pending_candidate_id = None
+            emit_checkpoint()
 
         best = self._archive.top_k(metric=_FITNESS_METRIC, k=1)
         best_candidate = best[0] if best else None
@@ -250,19 +330,13 @@ class EvolutionController:
                 "mutated candidate generation does not follow its parent"
             )
 
-    def _persist_and_evaluate(
+    def _evaluate(
         self,
         candidate: Candidate,
         *,
         controller_generation: int,
         failures: list[EvolutionFailure],
     ) -> bool:
-        added = self._archive.add_candidate(candidate)
-        if (
-            not added
-            and self._archive.get_evaluation(candidate.candidate_id) is not None
-        ):
-            return False
         try:
             evaluation = self._evaluator.evaluate(candidate)
             if evaluation.candidate_id != candidate.candidate_id:

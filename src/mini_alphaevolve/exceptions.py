@@ -36,3 +36,11 @@ class DuplicateCandidateError(ArchiveError):
 
 class DuplicateEvaluationError(ArchiveError):
     """Raised when an evaluation conflicts with an archived evaluation."""
+
+
+class RunArtifactError(MinimalAlphaEvolveError):
+    """Raised when run artifacts cannot be created or loaded safely."""
+
+
+class IncompatibleRunError(RunArtifactError):
+    """Raised when resume configuration differs from the immutable manifest."""

@@ -41,6 +41,12 @@ stores them in one append-only JSONL file, flushes each record before returning,
 and rebuilds its indexes when reopened. It is designed for a single writer;
 malformed records are reported with their file path and line number.
 
+Reproducible experiments use `RunDirectory`. Each run contains an immutable
+`manifest.json`, append-only `archive.jsonl` and `events.jsonl`, plus an
+atomically replaced `checkpoint.json`. Resuming requires the complete manifest
+to match and restores controller RNG state and any pending evaluation. Manifests
+retain only the SAIA endpoint hostname and never accept or store the API key.
+
 ## Quick start
 
 Python 3.11 or newer is recommended.

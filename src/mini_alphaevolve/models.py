@@ -116,6 +116,15 @@ class ExpressionLimits:
             raise ValueError("each allowed input name must have the form x0 ... xN")
         object.__setattr__(self, "allowed_input_names", names)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return a stable JSON-compatible representation."""
+        return {
+            "max_depth": self.max_depth,
+            "max_nodes": self.max_nodes,
+            "max_constant_magnitude": self.max_constant_magnitude,
+            "allowed_input_names": sorted(self.allowed_input_names),
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class StructuredMutatorConfig:
@@ -288,6 +297,19 @@ class EvolutionConfig:
         ):
             raise ValueError("inspiration_count must be a non-negative integer")
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return a complete JSON-compatible description of this configuration."""
+        return {
+            "seed": self.seed,
+            "generation_budget": self.generation_budget,
+            "evaluation_budget": self.evaluation_budget,
+            "initialization_size": self.initialization_size,
+            "top_k": self.top_k,
+            "inspiration_count": self.inspiration_count,
+            "random_max_depth": self.random_max_depth,
+            "expression_limits": self.expression_limits.to_dict(),
+        }
+
 
 FailureStage: TypeAlias = Literal["mutation", "evaluation"]
 
@@ -309,6 +331,226 @@ class EvolutionFailure:
             raise ValueError("error_type must not be empty")
         if not self.message:
             raise ValueError("message must not be empty")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "generation": self.generation,
+            "stage": self.stage,
+            "error_type": self.error_type,
+            "message": self.message,
+            "parent_id": self.parent_id,
+        }
+
+    @classmethod
+    def from_dict(cls, record: Mapping[str, Any]) -> EvolutionFailure:
+        generation = record.get("generation")
+        stage = record.get("stage")
+        if not isinstance(generation, int) or isinstance(generation, bool):
+            raise ValueError("failure generation must be an integer")
+        if stage not in ("mutation", "evaluation"):
+            raise ValueError("failure stage must be 'mutation' or 'evaluation'")
+        return cls(
+            generation=generation,
+            stage=stage,
+            error_type=_required_str(record, "error_type"),
+            message=_required_str(record, "message"),
+            parent_id=_optional_str(record, "parent_id"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EvolutionCheckpoint:
+    """Serializable continuation state for a deterministic controller run."""
+
+    SCHEMA_VERSION: ClassVar[int] = 1
+    RECORD_TYPE: ClassVar[str] = "evolution_checkpoint"
+
+    initializations_attempted: int = 0
+    generations_attempted: int = 0
+    evaluations_completed: int = 0
+    restart_index: int = 0
+    rng_state: tuple[Any, ...] | None = None
+    pending_candidate_id: str | None = None
+    failures: tuple[EvolutionFailure, ...] = ()
+
+    def __post_init__(self) -> None:
+        for name in (
+            "initializations_attempted",
+            "generations_attempted",
+            "evaluations_completed",
+            "restart_index",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        if self.rng_state is not None:
+            object.__setattr__(
+                self,
+                "rng_state",
+                _freeze_json(self.rng_state, field_name="rng_state"),
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "record_type": self.RECORD_TYPE,
+            "schema_version": self.SCHEMA_VERSION,
+            "initializations_attempted": self.initializations_attempted,
+            "generations_attempted": self.generations_attempted,
+            "evaluations_completed": self.evaluations_completed,
+            "restart_index": self.restart_index,
+            "rng_state": _thaw_json(self.rng_state),
+            "pending_candidate_id": self.pending_candidate_id,
+            "failures": [failure.to_dict() for failure in self.failures],
+        }
+
+    @classmethod
+    def from_dict(cls, record: Mapping[str, Any]) -> EvolutionCheckpoint:
+        _check_record_header(
+            record,
+            record_type=cls.RECORD_TYPE,
+            schema_version=cls.SCHEMA_VERSION,
+        )
+        counts: dict[str, int] = {}
+        for name in (
+            "initializations_attempted",
+            "generations_attempted",
+            "evaluations_completed",
+            "restart_index",
+        ):
+            value = record.get(name)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(f"{name} must be an integer")
+            counts[name] = value
+        rng_state = record.get("rng_state")
+        if rng_state is not None and not isinstance(rng_state, list):
+            raise ValueError("rng_state must be an array or null")
+        failures = record.get("failures", [])
+        if not isinstance(failures, list) or not all(
+            isinstance(item, Mapping) for item in failures
+        ):
+            raise ValueError("failures must be an array of objects")
+        return cls(
+            initializations_attempted=counts["initializations_attempted"],
+            generations_attempted=counts["generations_attempted"],
+            evaluations_completed=counts["evaluations_completed"],
+            restart_index=counts["restart_index"],
+            rng_state=(tuple(rng_state) if rng_state is not None else None),
+            pending_candidate_id=_optional_str(record, "pending_candidate_id"),
+            failures=tuple(EvolutionFailure.from_dict(item) for item in failures),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RunManifest:
+    """Immutable, non-secret provenance and configuration for one run."""
+
+    SCHEMA_VERSION: ClassVar[int] = 1
+    RECORD_TYPE: ClassVar[str] = "run_manifest"
+
+    run_id: str
+    started_at: str
+    source_revision: str | None
+    package_versions: Mapping[str, str]
+    model_name: str
+    endpoint_hostname: str
+    prompt_version: str
+    seed: int
+    budgets: Mapping[str, int]
+    evolution_config: Mapping[str, Any]
+    evaluator_config: Mapping[str, Any]
+    dsl_config: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        for name in ("run_id", "model_name", "endpoint_hostname", "prompt_version"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        _validate_utc_timestamp(self.started_at, field_name="started_at")
+        if not isinstance(self.seed, int) or isinstance(self.seed, bool):
+            raise ValueError("seed must be an integer")
+        versions = dict(self.package_versions)
+        if any(
+            not isinstance(name, str)
+            or not name
+            or not isinstance(version, str)
+            or not version
+            for name, version in versions.items()
+        ):
+            raise ValueError("package_versions must map non-empty strings")
+        checked_budgets: dict[str, int] = {}
+        for name, value in self.budgets.items():
+            if (
+                not isinstance(name, str)
+                or not name
+                or not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 0
+            ):
+                raise ValueError("budgets must map names to non-negative integers")
+            checked_budgets[name] = value
+        object.__setattr__(
+            self, "package_versions", MappingProxyType(dict(sorted(versions.items())))
+        )
+        object.__setattr__(self, "budgets", MappingProxyType(checked_budgets))
+        for name in ("evolution_config", "evaluator_config", "dsl_config"):
+            object.__setattr__(
+                self, name, _freeze_json(getattr(self, name), field_name=name)
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "record_type": self.RECORD_TYPE,
+            "schema_version": self.SCHEMA_VERSION,
+            "run_id": self.run_id,
+            "started_at": self.started_at,
+            "source_revision": self.source_revision,
+            "package_versions": dict(self.package_versions),
+            "model_name": self.model_name,
+            "endpoint_hostname": self.endpoint_hostname,
+            "prompt_version": self.prompt_version,
+            "seed": self.seed,
+            "budgets": dict(self.budgets),
+            "evolution_config": _thaw_json(self.evolution_config),
+            "evaluator_config": _thaw_json(self.evaluator_config),
+            "dsl_config": _thaw_json(self.dsl_config),
+        }
+
+    @classmethod
+    def from_dict(cls, record: Mapping[str, Any]) -> RunManifest:
+        _check_record_header(
+            record,
+            record_type=cls.RECORD_TYPE,
+            schema_version=cls.SCHEMA_VERSION,
+        )
+        mappings: dict[str, Mapping[str, Any]] = {}
+        for name in (
+            "package_versions",
+            "budgets",
+            "evolution_config",
+            "evaluator_config",
+            "dsl_config",
+        ):
+            value = record.get(name)
+            if not isinstance(value, Mapping):
+                raise ValueError(f"{name} must be an object")
+            mappings[name] = value
+        seed = record.get("seed")
+        if not isinstance(seed, int) or isinstance(seed, bool):
+            raise ValueError("seed must be an integer")
+        source_revision = _optional_str(record, "source_revision")
+        return cls(
+            run_id=_required_str(record, "run_id"),
+            started_at=_required_str(record, "started_at"),
+            source_revision=source_revision,
+            package_versions=mappings["package_versions"],
+            model_name=_required_str(record, "model_name"),
+            endpoint_hostname=_required_str(record, "endpoint_hostname"),
+            prompt_version=_required_str(record, "prompt_version"),
+            seed=seed,
+            budgets=mappings["budgets"],
+            evolution_config=mappings["evolution_config"],
+            evaluator_config=mappings["evaluator_config"],
+            dsl_config=mappings["dsl_config"],
+        )
 
 
 @dataclass(frozen=True, slots=True)
