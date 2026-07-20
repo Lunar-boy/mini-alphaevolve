@@ -10,6 +10,10 @@ class SaiaProtocolError(MinimalAlphaEvolveError):
     """Raised when SAIA returns an unexpected response shape."""
 
 
+class SaiaTransientError(MinimalAlphaEvolveError):
+    """Raised for a SAIA transport failure that is safe to retry."""
+
+
 class CandidateValidationError(MinimalAlphaEvolveError):
     """Raised when a candidate violates its representation contract."""
 

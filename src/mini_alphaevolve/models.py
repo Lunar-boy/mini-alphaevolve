@@ -118,6 +118,42 @@ class ExpressionLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class StructuredMutatorConfig:
+    """Immutable settings for one reproducible structured mutator."""
+
+    seed: int
+    limits: ExpressionLimits = field(default_factory=ExpressionLimits)
+    prompt_version: str = "mutation-v1"
+    max_attempts: int = 3
+    temperature: float = 0.2
+    max_tokens: int = 1024
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.seed, int) or isinstance(self.seed, bool):
+            raise ValueError("seed must be an integer")
+        if not self.prompt_version.strip():
+            raise ValueError("prompt_version must not be empty")
+        if (
+            not isinstance(self.max_attempts, int)
+            or isinstance(self.max_attempts, bool)
+            or self.max_attempts < 1
+        ):
+            raise ValueError("max_attempts must be a positive integer")
+        if not isinstance(self.temperature, (int, float)) or isinstance(
+            self.temperature, bool
+        ):
+            raise ValueError("temperature must be numeric")
+        if not math.isfinite(self.temperature) or not 0.0 <= self.temperature <= 2.0:
+            raise ValueError("temperature must be finite and between 0 and 2")
+        if (
+            not isinstance(self.max_tokens, int)
+            or isinstance(self.max_tokens, bool)
+            or self.max_tokens < 1
+        ):
+            raise ValueError("max_tokens must be a positive integer")
+
+
+@dataclass(frozen=True, slots=True)
 class ToyEvaluatorConfig:
     """Immutable configuration for the deterministic toy regression task."""
 

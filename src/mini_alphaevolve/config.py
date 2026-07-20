@@ -15,7 +15,7 @@ class SaiaSettings:
     max_retries: int = 2
 
     @classmethod
-    def from_env(cls, *, require_api_key: bool = True) -> "SaiaSettings":
+    def from_env(cls, *, require_api_key: bool = True) -> SaiaSettings:
         api_key = os.getenv("SAIA_API_KEY", "").strip()
         if require_api_key and not api_key:
             raise ConfigurationError(

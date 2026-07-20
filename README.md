@@ -64,6 +64,16 @@ pytest
 performs one chat-completion request using `SAIA_MODEL`, which defaults to
 `qwen3-coder-next`.
 
+To opt into one live end-to-end structured mutation (never run by the normal test
+suite), load the key as above and run:
+
+```bash
+minae mutation-smoke
+```
+
+The command requests one restricted-DSL candidate, validates it locally, and
+prints only its canonical JSON representation.
+
 ## Environment variables
 
 | Variable | Default | Purpose |
