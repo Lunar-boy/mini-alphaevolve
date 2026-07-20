@@ -253,6 +253,89 @@ class ToyEvaluatorConfig:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class EvolutionConfig:
+    """Immutable budgets and selection settings for one evolution run."""
+
+    seed: int
+    generation_budget: int
+    evaluation_budget: int
+    initialization_size: int = 4
+    top_k: int = 5
+    inspiration_count: int = 2
+    random_max_depth: int = 4
+    expression_limits: ExpressionLimits = field(default_factory=ExpressionLimits)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.seed, int) or isinstance(self.seed, bool):
+            raise ValueError("seed must be an integer")
+        for name in ("generation_budget", "evaluation_budget"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        for name in (
+            "initialization_size",
+            "top_k",
+            "random_max_depth",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if (
+            not isinstance(self.inspiration_count, int)
+            or isinstance(self.inspiration_count, bool)
+            or self.inspiration_count < 0
+        ):
+            raise ValueError("inspiration_count must be a non-negative integer")
+
+
+FailureStage: TypeAlias = Literal["mutation", "evaluation"]
+
+
+@dataclass(frozen=True, slots=True)
+class EvolutionFailure:
+    """A recoverable controller failure, retained for later reporting."""
+
+    generation: int
+    stage: FailureStage
+    error_type: str
+    message: str
+    parent_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.generation < 1:
+            raise ValueError("failure generation must be positive")
+        if not self.error_type:
+            raise ValueError("error_type must not be empty")
+        if not self.message:
+            raise ValueError("message must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class EvolutionResult:
+    """Summary returned after a bounded controller run."""
+
+    best_candidate: Candidate | None
+    best_evaluation: EvaluationResult | None
+    generations_attempted: int
+    evaluations_completed: int
+    failures: tuple[EvolutionFailure, ...] = ()
+
+    def __post_init__(self) -> None:
+        if (self.best_candidate is None) != (self.best_evaluation is None):
+            raise ValueError(
+                "best candidate and evaluation must both be present or absent"
+            )
+        if (
+            self.best_candidate is not None
+            and self.best_evaluation is not None
+            and self.best_candidate.candidate_id != self.best_evaluation.candidate_id
+        ):
+            raise ValueError("best evaluation must belong to best candidate")
+        if self.generations_attempted < 0 or self.evaluations_completed < 0:
+            raise ValueError("result counts must be non-negative")
+
+
 def utc_now_iso() -> str:
     """Return the current time as an explicit UTC ISO-8601 timestamp."""
     return datetime.now(UTC).isoformat()
