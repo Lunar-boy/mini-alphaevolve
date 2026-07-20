@@ -80,6 +80,18 @@ minae mutation-smoke
 The command requests one restricted-DSL candidate, validates it locally, and
 prints only its canonical JSON representation.
 
+Run the reproducible offline toy comparison across three seeds:
+
+```bash
+minae experiment --output experiments/toy-mvp
+```
+
+This compares seeded random search with the same evolution pipeline driven by a
+deterministic reference mutator. It writes append-only `archive.jsonl` raw
+records for every strategy/seed and root-level `summary.csv` and `summary.json`
+files. To replace the reference mutator with live SAIA requests, explicitly add
+`--live-saia` after loading `SAIA_API_KEY`.
+
 ## Environment variables
 
 | Variable | Default | Purpose |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Annotated
 
 import httpx
 import typer
@@ -10,13 +11,19 @@ from rich import print as rprint
 from mini_alphaevolve import __version__
 from mini_alphaevolve.config import SaiaSettings
 from mini_alphaevolve.exceptions import MinimalAlphaEvolveError
-from mini_alphaevolve.models import Candidate, StructuredMutatorConfig
+from mini_alphaevolve.models import (
+    Candidate,
+    ExperimentConfig,
+    StructuredMutatorConfig,
+)
+from mini_alphaevolve.reporting import ReferenceToyMutator, run_toy_experiment
 from mini_alphaevolve.saia_client import SaiaClient, StructuredSaiaMutator
 
 app = typer.Typer(
     no_args_is_help=True,
     help="Minimal AlphaEvolve-style framework using GWDG SAIA.",
 )
+_DEFAULT_EXPERIMENT_OUTPUT = Path("experiments/toy-mvp")
 
 
 @app.command()
@@ -124,3 +131,63 @@ def mutation_smoke() -> None:
         raise typer.Exit(code=1) from exc
 
     rprint(candidate.representation)
+
+
+@app.command()
+def experiment(
+    output: Annotated[
+        Path, typer.Option(help="New directory for raw run records and summaries.")
+    ] = _DEFAULT_EXPERIMENT_OUTPUT,
+    seeds: str = typer.Option("0,1,2", help="Comma-separated unique integer seeds."),
+    generations: int = typer.Option(10, min=0, help="Mutation generations per seed."),
+    initialization_size: int = typer.Option(
+        4, min=1, help="Generation-zero candidates per seed."
+    ),
+    live_saia: bool = typer.Option(
+        False,
+        "--live-saia",
+        help="Use live SAIA instead of the deterministic offline reference mutator.",
+    ),
+) -> None:
+    """Run the reproducible multi-seed toy MVP comparison."""
+    try:
+        parsed_seeds = tuple(int(item.strip()) for item in seeds.split(","))
+        experiment_config = ExperimentConfig(
+            seeds=parsed_seeds,
+            generation_budget=generations,
+            initialization_size=initialization_size,
+        )
+    except ValueError as exc:
+        rprint(f"[red]Invalid experiment configuration:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    try:
+        if live_saia:
+            settings = SaiaSettings.from_env()
+            with SaiaClient(settings) as client:
+                rows = run_toy_experiment(
+                    output_directory=output,
+                    config=experiment_config,
+                    evolution_mutator_factory=lambda seed: StructuredSaiaMutator(
+                        client, StructuredMutatorConfig(seed=seed)
+                    ),
+                    evolution_model_name=settings.model,
+                    endpoint_url=settings.base_url,
+                )
+        else:
+            rows = run_toy_experiment(
+                output_directory=output,
+                config=experiment_config,
+                evolution_mutator_factory=lambda _seed: ReferenceToyMutator(),
+            )
+    except (httpx.HTTPError, MinimalAlphaEvolveError) as exc:
+        rprint(f"[red]Experiment failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    final_rows = [
+        row for row in rows if row.generation == experiment_config.generation_budget
+    ]
+    rprint(
+        f"[green]Experiment complete.[/green] Wrote {len(final_rows)} final "
+        f"seed results to {output}"
+    )

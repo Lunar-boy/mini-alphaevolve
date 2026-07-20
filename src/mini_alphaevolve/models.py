@@ -578,6 +578,91 @@ class EvolutionResult:
             raise ValueError("result counts must be non-negative")
 
 
+@dataclass(frozen=True, slots=True)
+class ExperimentConfig:
+    """Immutable configuration shared by every arm of a toy experiment."""
+
+    seeds: tuple[int, ...]
+    generation_budget: int
+    initialization_size: int = 4
+
+    def __post_init__(self) -> None:
+        seeds = tuple(self.seeds)
+        if not seeds:
+            raise ValueError("experiment seeds must not be empty")
+        if any(not isinstance(seed, int) or isinstance(seed, bool) for seed in seeds):
+            raise ValueError("experiment seeds must be integers")
+        if len(set(seeds)) != len(seeds):
+            raise ValueError("experiment seeds must be unique")
+        if (
+            not isinstance(self.generation_budget, int)
+            or isinstance(self.generation_budget, bool)
+            or self.generation_budget < 0
+        ):
+            raise ValueError("generation_budget must be a non-negative integer")
+        if (
+            not isinstance(self.initialization_size, int)
+            or isinstance(self.initialization_size, bool)
+            or self.initialization_size < 1
+        ):
+            raise ValueError("initialization_size must be a positive integer")
+        object.__setattr__(self, "seeds", seeds)
+
+    @property
+    def evaluation_budget(self) -> int:
+        return self.initialization_size + self.generation_budget
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "seeds": list(self.seeds),
+            "generation_budget": self.generation_budget,
+            "initialization_size": self.initialization_size,
+            "evaluation_budget": self.evaluation_budget,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationSummary:
+    """Machine-readable metrics for one strategy, seed, and generation."""
+
+    strategy: str
+    seed: int
+    generation: int
+    best_fitness: float | None
+    median_fitness: float | None
+    train_error: float | None
+    test_error: float | None
+    complexity: float | None
+    valid_candidate_rate: float
+    improvement_rate: float
+    mutation_count: int
+    evaluation_count: int
+    llm_request_count: int
+    prompt_token_count: int
+    completion_token_count: int
+    estimated_token_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "strategy": self.strategy,
+            "seed": self.seed,
+            "generation": self.generation,
+            "best_fitness": self.best_fitness,
+            "median_fitness": self.median_fitness,
+            "train_error": self.train_error,
+            "test_error": self.test_error,
+            "complexity": self.complexity,
+            "valid_candidate_rate": self.valid_candidate_rate,
+            "improvement_rate": self.improvement_rate,
+            "mutation_count": self.mutation_count,
+            "evaluation_count": self.evaluation_count,
+            "llm_request_count": self.llm_request_count,
+            "prompt_token_count": self.prompt_token_count,
+            "completion_token_count": self.completion_token_count,
+            "estimated_token_count": self.estimated_token_count,
+        }
+
+
 def utc_now_iso() -> str:
     """Return the current time as an explicit UTC ISO-8601 timestamp."""
     return datetime.now(UTC).isoformat()

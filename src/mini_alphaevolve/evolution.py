@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from mini_alphaevolve.dsl import canonical_expression_json
@@ -211,6 +211,7 @@ class EvolutionController:
             if candidate.parent_id is not None or candidate.generation != 0:
                 raise ValueError("initial candidates must be generation-zero roots")
             initializations_attempted += 1
+            candidate = self._for_controller_generation(candidate, 0)
             added = self._archive.add_candidate(candidate)
             if not added and self._archive.get_evaluation(candidate.candidate_id):
                 emit_checkpoint()
@@ -261,6 +262,9 @@ class EvolutionController:
                     )
                     emit_checkpoint()
                     continue
+            candidate = self._for_controller_generation(
+                candidate, controller_generation
+            )
             added = self._archive.add_candidate(candidate)
             if not added and self._archive.get_evaluation(candidate.candidate_id):
                 emit_checkpoint()
@@ -289,6 +293,20 @@ class EvolutionController:
             generations_attempted=generations_attempted,
             evaluations_completed=evaluations_completed,
             failures=tuple(failures),
+        )
+
+    def _for_controller_generation(
+        self, candidate: Candidate, controller_generation: int
+    ) -> Candidate:
+        existing = self._archive.get_candidate(candidate.candidate_id)
+        if existing is not None:
+            return existing
+        return replace(
+            candidate,
+            metadata={
+                **dict(candidate.metadata),
+                "controller_generation": controller_generation,
+            },
         )
 
     def _random_roots(self, count: int) -> tuple[Candidate, ...]:

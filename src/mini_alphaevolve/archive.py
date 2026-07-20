@@ -35,6 +35,14 @@ class JsonlArchive:
     def __len__(self) -> int:
         return self.candidate_count
 
+    def candidates(self) -> tuple[Candidate, ...]:
+        """Return candidates in append order for deterministic reporting."""
+        return tuple(self._candidates.values())
+
+    def evaluations(self) -> tuple[EvaluationResult, ...]:
+        """Return evaluations in append order for deterministic reporting."""
+        return tuple(self._evaluations.values())
+
     def add_candidate(self, candidate: Candidate) -> bool:
         """Append a new candidate, returning false for an identical duplicate."""
         existing = self._candidates.get(candidate.candidate_id)
