@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
 
@@ -26,6 +28,15 @@ app = typer.Typer(
 _DEFAULT_EXPERIMENT_OUTPUT = Path("experiments/toy-mvp")
 
 
+@contextmanager
+def _handle_runtime_errors(label: str) -> Iterator[None]:
+    try:
+        yield
+    except (httpx.HTTPError, MinimalAlphaEvolveError) as exc:
+        rprint(f"[red]{label}:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+
 @app.command()
 def doctor(
     live: bool = typer.Option(False, help="Perform a live SAIA POST /models request."),
@@ -39,20 +50,17 @@ def doctor(
     rprint(f"Key file: {key_path} ({key_state})")
     rprint(f"SAIA_API_KEY environment variable: {'set' if env_key_set else 'not set'}")
 
-    settings = SaiaSettings.from_env(require_api_key=live)
-    rprint(f"Base URL: {settings.base_url}")
-    rprint(f"Model: {settings.model}")
+    with _handle_runtime_errors("SAIA check failed"):
+        settings = SaiaSettings.from_env(require_api_key=live)
+        rprint(f"Base URL: {settings.base_url}")
+        rprint(f"Model: {settings.model}")
 
-    if not live:
-        rprint("[yellow]Live API check skipped. Use --live to call SAIA.[/yellow]")
-        return
+        if not live:
+            rprint("[yellow]Live API check skipped. Use --live to call SAIA.[/yellow]")
+            return
 
-    try:
         with SaiaClient(settings) as client:
             models = client.list_models()
-    except (httpx.HTTPError, MinimalAlphaEvolveError) as exc:
-        rprint(f"[red]SAIA check failed:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
 
     rprint(f"[green]SAIA access works.[/green] Available models: {len(models)}")
     if settings.model not in models:
@@ -64,13 +72,10 @@ def doctor(
 @app.command("models")
 def models_command() -> None:
     """List model identifiers returned by SAIA."""
-    settings = SaiaSettings.from_env()
-    try:
+    with _handle_runtime_errors("Unable to list models"):
+        settings = SaiaSettings.from_env()
         with SaiaClient(settings) as client:
             models = client.list_models()
-    except (httpx.HTTPError, MinimalAlphaEvolveError) as exc:
-        rprint(f"[red]Unable to list models:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
 
     for model in models:
         marker = " *" if model == settings.model else ""
@@ -86,8 +91,8 @@ def smoke(
     ),
 ) -> None:
     """Run one live SAIA chat-completion request."""
-    settings = SaiaSettings.from_env()
-    try:
+    with _handle_runtime_errors("SAIA completion failed"):
+        settings = SaiaSettings.from_env()
         with SaiaClient(settings) as client:
             completion = client.complete(
                 system=(
@@ -99,9 +104,6 @@ def smoke(
                 max_tokens=256,
                 seed=0,
             )
-    except (httpx.HTTPError, MinimalAlphaEvolveError) as exc:
-        rprint(f"[red]SAIA completion failed:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
 
     rprint(f"[bold]Model:[/bold] {completion.model}")
     rprint(completion.content)
@@ -110,12 +112,12 @@ def smoke(
 @app.command("mutation-smoke")
 def mutation_smoke() -> None:
     """Run one opt-in live structured mutation with the default SAIA model."""
-    settings = SaiaSettings.from_env()
     parent = Candidate(
         representation='{"name":"x0","op":"input"}',
         generation=0,
     )
-    try:
+    with _handle_runtime_errors("SAIA structured mutation failed"):
+        settings = SaiaSettings.from_env()
         with SaiaClient(settings) as client:
             mutator = StructuredSaiaMutator(
                 client,
@@ -126,9 +128,6 @@ def mutation_smoke() -> None:
                 metrics={"fitness": -10.0, "complexity": 1.0},
                 failure_cases=("x0=2: identity predicts 2; target is 7",),
             )
-    except (httpx.HTTPError, MinimalAlphaEvolveError) as exc:
-        rprint(f"[red]SAIA structured mutation failed:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
 
     rprint(candidate.representation)
 
@@ -161,7 +160,7 @@ def experiment(
         rprint(f"[red]Invalid experiment configuration:[/red] {exc}")
         raise typer.Exit(code=2) from exc
 
-    try:
+    with _handle_runtime_errors("Experiment failed"):
         if live_saia:
             settings = SaiaSettings.from_env()
             with SaiaClient(settings) as client:
@@ -180,9 +179,6 @@ def experiment(
                 config=experiment_config,
                 evolution_mutator_factory=lambda _seed: ReferenceToyMutator(),
             )
-    except (httpx.HTTPError, MinimalAlphaEvolveError) as exc:
-        rprint(f"[red]Experiment failed:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
 
     final_rows = [
         row for row in rows if row.generation == experiment_config.generation_budget

@@ -14,6 +14,10 @@ class SaiaTransientError(MinimalAlphaEvolveError):
     """Raised for a SAIA transport failure that is safe to retry."""
 
 
+class SaiaRequestError(MinimalAlphaEvolveError):
+    """Raised when SAIA permanently rejects a request."""
+
+
 class CandidateValidationError(MinimalAlphaEvolveError):
     """Raised when a candidate violates its representation contract."""
 

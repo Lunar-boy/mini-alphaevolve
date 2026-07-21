@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 key_file="${HOME}/.config/saia/api_key"
 

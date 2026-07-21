@@ -4,16 +4,17 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeGuard
 
 import httpx
-from openai import APIConnectionError, APIStatusError
+from openai import APIConnectionError, APIStatusError, OpenAIError
 
 from mini_alphaevolve.config import SaiaSettings
 from mini_alphaevolve.dsl import canonical_expression_json, parse_expression
 from mini_alphaevolve.exceptions import (
     CandidateValidationError,
     SaiaProtocolError,
+    SaiaRequestError,
     SaiaTransientError,
 )
 from mini_alphaevolve.models import (
@@ -27,6 +28,12 @@ _FENCED_JSON = re.compile(
     r"\A\s*```(?:json)?[ \t]*\r?\n(?P<payload>.*?)\r?\n```\s*\Z",
     flags=re.DOTALL | re.IGNORECASE,
 )
+_PERMANENT_STATUS_MESSAGES = {
+    400: "invalid or unsupported request",
+    401: "authentication failed or invalid API key",
+    403: "access forbidden or insufficient permissions",
+    404: "endpoint or configured model not found",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,7 +214,11 @@ class SaiaClient:
     def list_models(self) -> list[str]:
         response = self._http.post("/models")
         response.raise_for_status()
-        return self.parse_model_ids(response.json())
+        try:
+            payload = response.json()
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise SaiaProtocolError("The /models response was not valid JSON.") from exc
+        return self.parse_model_ids(payload)
 
     @staticmethod
     def parse_model_ids(payload: Any) -> list[str]:
@@ -255,24 +266,61 @@ class SaiaClient:
         try:
             response = self._openai.chat.completions.create(**kwargs)
         except APIConnectionError as exc:
-            raise SaiaTransientError(
-                f"transient SAIA connection failure: {exc}"
-            ) from exc
+            raise SaiaTransientError("transient SAIA connection failure") from exc
         except APIStatusError as exc:
             if exc.status_code in {408, 409, 429} or exc.status_code >= 500:
                 raise SaiaTransientError(
                     f"transient SAIA HTTP {exc.status_code} response"
                 ) from exc
-            raise
-        content = response.choices[0].message.content
-        if not content:
+            explanation = _PERMANENT_STATUS_MESSAGES.get(
+                exc.status_code, "request was permanently rejected"
+            )
+            raise SaiaRequestError(
+                f"SAIA HTTP {exc.status_code}: {explanation}."
+            ) from exc
+        except OpenAIError as exc:
+            raise SaiaProtocolError(
+                "The SAIA client could not process the completion response."
+            ) from exc
+
+        response_value: object = response
+        choices = getattr(response_value, "choices", None)
+        if not isinstance(choices, Sequence) or isinstance(choices, (str, bytes)):
+            raise SaiaProtocolError("SAIA completion has malformed choices metadata.")
+        if not choices:
+            raise SaiaProtocolError("SAIA completion contained no choices.")
+
+        message = getattr(choices[0], "message", None)
+        content = getattr(message, "content", None)
+        if not isinstance(content, str) or not content.strip():
             raise SaiaProtocolError("SAIA returned an empty completion.")
 
-        usage = response.usage
+        model = getattr(response_value, "model", None)
+        if not isinstance(model, str) or not model.strip():
+            raise SaiaProtocolError("SAIA completion has no valid model identifier.")
+        response_id = getattr(response_value, "id", None)
+        if response_id is not None and not isinstance(response_id, str):
+            raise SaiaProtocolError("SAIA completion has a malformed response ID.")
+
+        usage = getattr(response_value, "usage", None)
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_tokens", None)
+            completion_tokens = getattr(usage, "completion_tokens", None)
+            if not self._valid_token_count(
+                prompt_tokens
+            ) or not self._valid_token_count(completion_tokens):
+                raise SaiaProtocolError("SAIA completion has malformed usage metadata.")
+
         return Completion(
             content=content,
-            model=response.model,
-            response_id=response.id,
-            prompt_tokens=usage.prompt_tokens if usage is not None else None,
-            completion_tokens=(usage.completion_tokens if usage is not None else None),
+            model=model,
+            response_id=response_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )
+
+    @staticmethod
+    def _valid_token_count(value: object) -> TypeGuard[int]:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0

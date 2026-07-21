@@ -120,6 +120,10 @@ Load the key and default SAIA settings into the current shell:
 source scripts/load_saia_key.sh
 ```
 
+The helper validates the key file without changing persistent `errexit`, `nounset`,
+or `pipefail` settings in the current shell. It may also be run directly to check
+the key file, though direct execution cannot export variables to the parent shell.
+
 Equivalent explicit configuration:
 
 ```bash
@@ -132,12 +136,18 @@ Use `minae models` to verify that the configured model is currently available.
 
 ## Live SAIA checks
 
-Verify API access:
+Troubleshoot the configuration and API in this order:
 
 ```bash
+minae doctor
 minae doctor --live
 minae models
+minae smoke
+minae mutation-smoke
 ```
+
+Failed live commands print a concise diagnostic and return a non-zero status. They
+do not change shell options or close an existing interactive terminal.
 
 Select another available model when necessary:
 
