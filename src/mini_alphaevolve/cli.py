@@ -121,7 +121,7 @@ def mutation_smoke() -> None:
         with SaiaClient(settings) as client:
             mutator = StructuredSaiaMutator(
                 client,
-                StructuredMutatorConfig(seed=0, max_attempts=1),
+                StructuredMutatorConfig(seed=0, max_attempts=3),
             )
             candidate = mutator.mutate(
                 parent=parent,

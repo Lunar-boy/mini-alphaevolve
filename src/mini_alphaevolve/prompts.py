@@ -26,12 +26,15 @@ def build_mutation_prompt(
     failure_cases: Sequence[str],
     limits: ExpressionLimits,
     prompt_version: str,
+    validation_feedback: Sequence[str] = (),
 ) -> MutationPrompt:
     """Build a deterministic mutation prompt without performing I/O."""
     if not prompt_version.strip():
         raise ValueError("prompt_version must not be empty")
     checked_metrics = _checked_metrics(metrics)
     checked_failures = _checked_failures(failure_cases)
+    checked_feedback = _checked_failures(validation_feedback)
+    input_name = sorted(limits.allowed_input_names)[0]
 
     context = {
         "parent": {
@@ -47,7 +50,8 @@ def build_mutation_prompt(
         ],
         "evaluator_metrics": checked_metrics,
         "failure_cases": checked_failures,
-        "dsl_schema": _dsl_schema(),
+        "validation_feedback": checked_feedback,
+        "dsl_schema": _dsl_schema(input_name),
         "dsl_limits": {
             "max_depth": limits.max_depth,
             "max_nodes": limits.max_nodes,
@@ -62,18 +66,27 @@ def build_mutation_prompt(
         separators=(",", ":"),
         sort_keys=True,
     )
+    correction = ""
+    if checked_feedback:
+        correction = (
+            " A previous response failed local validation. Correct every error in "
+            "validation_feedback and return a fresh complete candidate."
+        )
     return MutationPrompt(
         system=(
             "You are a restricted expression mutation component. "
             f"Prompt template version: {prompt_version}. "
-            "Obey the supplied DSL schema and limits exactly. Never emit Python, "
-            "prose, comments, Markdown, or more than one candidate."
+            'Obey the supplied DSL schema and limits exactly. The "op" field '
+            "must always be one JSON string, never an array or object. Never emit "
+            "Python, prose, comments, Markdown, or more than one candidate."
         ),
         user=(
             "Propose a useful mutation of the parent expression. Elite expressions "
             "are inspiration only; use the metrics and failure cases to guide the "
             "change. Return exactly one JSON object matching the DSL, with no "
-            "wrapper or explanation.\n\nMutation context:\n"
+            'wrapper or explanation. The "op" must always be one JSON string, '
+            "never an array or object."
+            f"{correction}\n\nMutation context:\n"
             f"{serialized_context}"
         ),
     )
@@ -102,27 +115,47 @@ def _checked_failures(failure_cases: Sequence[str]) -> list[str]:
     return failures
 
 
-def _dsl_schema() -> dict[str, object]:
-    """Return the complete set of permitted node shapes."""
+def _dsl_schema(input_name: str) -> dict[str, object]:
+    """Return operator rules and complete examples of every permitted node shape."""
+    input_example = {"op": "input", "name": input_name}
+    constant_example = {"op": "const", "value": 0}
     return {
-        "constant": {"op": "const", "value": "finite number"},
-        "input": {"op": "input", "name": "allowed input name"},
-        "unary": {"op": ["abs", "tanh"], "arg": "expression"},
-        "binary": {
-            "op": ["add", "sub", "mul", "div", "min", "max"],
-            "left": "expression",
-            "right": "expression",
+        "operator_rule": (
+            'Every node has exactly one "op" field. Its value must be one JSON '
+            "string, never an array or object."
+        ),
+        "allowed_operator_strings": {
+            "constant": "const",
+            "input": "input",
+            "unary": "abs, tanh",
+            "binary": "add, sub, mul, div, min, max",
+            "comparison": "lt, le, gt, ge, eq, ne",
+            "conditional": "if",
         },
-        "comparison": {
-            "op": ["lt", "le", "gt", "ge", "eq", "ne"],
-            "left": "expression",
-            "right": "expression",
-        },
-        "conditional": {
-            "op": "if",
-            "condition": "expression",
-            "then": "expression",
-            "else": "expression",
+        "complete_valid_examples": {
+            "input": input_example,
+            "constant": constant_example,
+            "unary": {"op": "abs", "arg": input_example},
+            "binary": {
+                "op": "add",
+                "left": input_example,
+                "right": constant_example,
+            },
+            "comparison": {
+                "op": "gt",
+                "left": input_example,
+                "right": constant_example,
+            },
+            "conditional": {
+                "op": "if",
+                "condition": {
+                    "op": "gt",
+                    "left": input_example,
+                    "right": constant_example,
+                },
+                "then": input_example,
+                "else": constant_example,
+            },
         },
         "additional_fields": "forbidden",
     }

@@ -92,9 +92,12 @@ def test_extract_candidate_json_rejects_ambiguous_formats(response: str) -> None
         extract_candidate_json(response)
 
 
-def test_mutator_retries_schema_failure_then_returns_validated_candidate() -> None:
+def test_mutator_feeds_validation_failure_back_and_recovers() -> None:
     client = FakeCompletionClient(
-        [completion("not JSON"), completion('```json\n{"op":"input","name":"x0"}\n```')]
+        [
+            completion('{"op":["add","sub"],"left":{},"right":{}}'),
+            completion('```json\n{"op":"input","name":"x0"}\n```'),
+        ]
     )
     mutator = StructuredSaiaMutator(
         client,
@@ -110,6 +113,14 @@ def test_mutator_retries_schema_failure_then_returns_validated_candidate() -> No
     )
 
     assert len(client.calls) == 2
+    first_user = client.calls[0]["user"]
+    second_user = client.calls[1]["user"]
+    assert isinstance(first_user, str)
+    assert isinstance(second_user, str)
+    assert first_user != second_user
+    assert '"validation_feedback":[]' in first_user
+    assert '"validation_feedback":["$.op must be a string"]' in second_user
+    assert '["add","sub"]' not in second_user
     assert candidate.representation == '{"name":"x0","op":"input"}'
     assert candidate.parent_id == parent.candidate_id
     assert candidate.generation == 4
@@ -173,6 +184,24 @@ def test_mutator_exhausts_bounded_schema_retry_budget() -> None:
         mutator.mutate(parent=parent, metrics={}, failure_cases=())
 
     assert len(client.calls) == 2
+
+
+def test_exhausted_validation_error_has_safe_response_diagnostic() -> None:
+    invalid_response = "private-looking-response-body"
+    client = FakeCompletionClient([completion(invalid_response)])
+    mutator = StructuredSaiaMutator(
+        client, StructuredMutatorConfig(seed=0, max_attempts=1)
+    )
+    parent = Candidate(representation='{"op":"input","name":"x0"}', generation=0)
+
+    with pytest.raises(CandidateValidationError) as exc_info:
+        mutator.mutate(parent=parent, metrics={}, failure_cases=())
+
+    message = str(exc_info.value)
+    assert "invalid response diagnostic" in message
+    assert f"characters={len(invalid_response)}" in message
+    assert "sha256=" in message
+    assert invalid_response not in message
 
 
 def test_unsafe_or_out_of_schema_response_never_becomes_a_candidate() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
@@ -112,16 +113,19 @@ class StructuredSaiaMutator:
         inspirations: Sequence[Candidate] = (),
     ) -> Candidate:
         """Return a validated candidate, retrying only retryable failures."""
-        prompt = build_mutation_prompt(
-            parent=parent,
-            inspirations=inspirations,
-            metrics=metrics,
-            failure_cases=failure_cases,
-            limits=self.config.limits,
-            prompt_version=self.config.prompt_version,
-        )
+        validation_feedback: list[str] = []
         last_failure: Exception | None = None
-        for _attempt in range(1, self.config.max_attempts + 1):
+        last_response_diagnostic: str | None = None
+        for attempt in range(1, self.config.max_attempts + 1):
+            prompt = build_mutation_prompt(
+                parent=parent,
+                inspirations=inspirations,
+                metrics=metrics,
+                failure_cases=failure_cases,
+                limits=self.config.limits,
+                prompt_version=self.config.prompt_version,
+                validation_feedback=validation_feedback,
+            )
             try:
                 completion = self._client.complete(
                     system=prompt.system,
@@ -130,15 +134,25 @@ class StructuredSaiaMutator:
                     max_tokens=self.config.max_tokens,
                     seed=self.config.seed,
                 )
-                payload = extract_candidate_json(completion.content)
-                expression = parse_expression(payload, limits=self.config.limits)
             except (
-                CandidateValidationError,
                 SaiaProtocolError,
                 SaiaTransientError,
                 httpx.TransportError,
             ) as exc:
                 last_failure = exc
+                last_response_diagnostic = None
+                continue
+
+            try:
+                payload = extract_candidate_json(completion.content)
+                expression = parse_expression(payload, limits=self.config.limits)
+            except CandidateValidationError as exc:
+                last_failure = exc
+                validation_feedback.append(_concise_validation_feedback(exc))
+                last_response_diagnostic = _invalid_response_diagnostic(
+                    content=completion.content,
+                    attempt=attempt,
+                )
                 continue
 
             return Candidate(
@@ -163,9 +177,26 @@ class StructuredSaiaMutator:
             "structured mutation failed after "
             f"{self.config.max_attempts} attempts: {last_failure}"
         )
+        if last_response_diagnostic is not None:
+            message = f"{message}; {last_response_diagnostic}"
         if isinstance(last_failure, (SaiaTransientError, httpx.TransportError)):
             raise SaiaTransientError(message) from last_failure
         raise CandidateValidationError(message) from last_failure
+
+
+def _concise_validation_feedback(exc: CandidateValidationError) -> str:
+    """Return bounded validation feedback without including the response body."""
+    message = " ".join(str(exc).split())
+    return message[:500]
+
+
+def _invalid_response_diagnostic(*, content: str, attempt: int) -> str:
+    """Fingerprint invalid content without reproducing potentially sensitive text."""
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    return (
+        f"invalid response diagnostic: attempt={attempt}, "
+        f"characters={len(content)}, sha256={digest}"
+    )
 
 
 class SaiaClient:

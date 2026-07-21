@@ -166,6 +166,11 @@ def test_malformed_json_is_rejected(payload: str) -> None:
         parse_expression(payload, limits=LIMITS)
 
 
+def test_array_valued_operator_is_rejected() -> None:
+    with pytest.raises(CandidateValidationError, match=r"\$\.op must be a string"):
+        parse_expression('{"op":["add","sub"],"left":{},"right":{}}')
+
+
 @pytest.mark.parametrize(
     "payload",
     [

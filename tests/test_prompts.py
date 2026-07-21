@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+
+from mini_alphaevolve.dsl import parse_expression
 from mini_alphaevolve.models import Candidate, ExpressionLimits
 from mini_alphaevolve.prompts import build_mutation_prompt
 
@@ -50,6 +53,20 @@ def test_mutation_prompt_is_pure_complete_and_deterministic() -> None:
     assert '"max_constant_magnitude":12.5' in first.user
     assert '"allowed_input_names":["x0","x1"]' in first.user
     assert '"op":"if"' in first.user
+    assert '"op":["' not in first.user
+    assert '"op" must always be one JSON string, never an array or object' in first.user
+    context = json.loads(first.user.split("Mutation context:\n", maxsplit=1)[1])
+    examples = context["dsl_schema"]["complete_valid_examples"]
+    assert set(examples) == {
+        "input",
+        "constant",
+        "unary",
+        "binary",
+        "comparison",
+        "conditional",
+    }
+    for example in examples.values():
+        parse_expression(json.dumps(example), limits=limits)
     assert "Return exactly one JSON object" in first.user
 
 
@@ -67,3 +84,20 @@ def test_mutation_prompt_supports_no_inspirations_or_failures() -> None:
 
     assert '"elite_inspirations":[]' in prompt.user
     assert '"failure_cases":[]' in prompt.user
+
+
+def test_mutation_prompt_includes_corrective_validation_feedback() -> None:
+    parent = Candidate(representation='{"op":"input","name":"x0"}', generation=0)
+
+    prompt = build_mutation_prompt(
+        parent=parent,
+        inspirations=(),
+        metrics={},
+        failure_cases=(),
+        limits=ExpressionLimits(),
+        prompt_version="mutation-v1",
+        validation_feedback=("$.op must be a string",),
+    )
+
+    assert '"validation_feedback":["$.op must be a string"]' in prompt.user
+    assert "previous response failed local validation" in prompt.user
